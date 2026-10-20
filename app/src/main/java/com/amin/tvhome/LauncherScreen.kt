@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -113,9 +112,6 @@ fun LauncherScreen(
     onLaunch: (AppEntry) -> Unit,
     onAppInfo: (AppEntry) -> Unit,
     onSetting: (SettingShortcut) -> Unit,
-    setupStatus: String?,
-    onMakeHome: () -> Unit,
-    onRestoreHome: () -> Unit,
 ) {
     var section by remember { mutableStateOf(Section.Apps) }
     val appsGrid = rememberLazyGridState()
@@ -133,8 +129,8 @@ fun LauncherScreen(
     // Home (or Back) always lands on the first app at the top of the grid, like tvOS.
     suspend fun goHome() {
         if (section != Section.Apps) {
-            // Park focus on the Apps tab before the Settings grid is torn down. Otherwise the
-            // focused tile vanishes, the tab row's restorer picks "Settings", and that re-selects it.
+            // Park focus on the Apps tab before the other grid is torn down. Otherwise the focused
+            // tile vanishes, the tab row's restorer picks the old tab, and that re-selects it.
             tabs.getValue(Section.Apps).tryFocus()
             section = Section.Apps
             withFrameNanos { }
@@ -174,7 +170,7 @@ fun LauncherScreen(
             TopBar(section, tabs, onSelect = { section = it })
             when (section) {
                 Section.Apps -> AppsGrid(apps, appsGrid, firstApp, cachedArt, loadArt, onLaunch, onAppInfo)
-                Section.Settings -> SettingsGrid(settings, setupStatus, onSetting, onMakeHome, onRestoreHome)
+                Section.Settings -> TextTileGrid(settings.map { it.label to { onSetting(it) } })
             }
         }
     }
@@ -313,16 +309,8 @@ private fun AppsGrid(
 }
 
 @Composable
-private fun SettingsGrid(
-    shortcuts: List<SettingShortcut>,
-    status: String?,
-    onOpen: (SettingShortcut) -> Unit,
-    onMakeHome: () -> Unit,
-    onRestoreHome: () -> Unit,
-) {
+private fun TextTileGrid(tiles: List<Pair<String, () -> Unit>>) {
     val first = remember { FocusRequester() }
-    val tiles = listOf("Use as Home Screen" to onMakeHome, "Restore Amazon Home" to onRestoreHome) +
-        shortcuts.map { s -> s.label to { onOpen(s) } }
     LazyVerticalGrid(
         columns = GridCells.Fixed(4),
         modifier = Modifier
@@ -332,11 +320,6 @@ private fun SettingsGrid(
         horizontalArrangement = Arrangement.spacedBy(28.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        if (status != null) {
-            item(key = "status", span = { GridItemSpan(maxLineSpan) }) {
-                Text(text = status, modifier = Modifier.padding(bottom = 10.dp), color = TextPrimary, fontSize = 15.sp)
-            }
-        }
         itemsIndexed(tiles, key = { _, (label, _) -> label }) { index, (label, onClick) ->
             Tile(
                 label = label,

@@ -1,4 +1,6 @@
 # Disabled by ./debloat.sh, re-enabled by ./restore-stock.sh. Missing packages are skipped.
 com.amazon.tv.launcher
+# Fire OS 8 also routes Home through this, at a higher priority than any third-party launcher.
+com.amazon.firehomestarter
 com.amazon.tv.mshop.android.app
 com.amazon.ftv.adsystem

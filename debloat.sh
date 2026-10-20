@@ -18,3 +18,17 @@ for p in ${(f)"$(grep -v '^#' bloat-packages.txt)"}; do
   fi
 done
 a shell cmd package set-home-activity com.amin.tvhome/.MainActivity
+
+# Fire OS 8 protects its launcher ("Cannot disable a protected package"), so Home still resolves to
+# Amazon. Fall back to the launcher's accessibility service, which hops from Amazon's home to ours.
+HOME_TARGET=$(a shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tr -d '\r' | tail -1)
+if [[ $HOME_TARGET != com.amin.tvhome/* ]]; then
+  SVC=com.amin.tvhome/com.amin.tvhome.HomeRedirectService
+  CUR=$(a shell settings get secure enabled_accessibility_services | tr -d '\r')
+  if [[ $CUR != *$SVC* ]]; then
+    if [[ -z $CUR || $CUR == null ]]; then NEW=$SVC; else NEW="$CUR:$SVC"; fi
+    a shell settings put secure enabled_accessibility_services "$NEW"
+  fi
+  a shell settings put secure accessibility_enabled 1
+  echo "Amazon's launcher is protected on this Fire OS; the Home-button redirect is on instead."
+fi

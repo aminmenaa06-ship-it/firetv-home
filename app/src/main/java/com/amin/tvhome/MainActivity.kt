@@ -9,17 +9,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var repo: AppRepository
-    private lateinit var homeSetup: HomeSetup
-    private var setupStatus by mutableStateOf<String?>(null)
-    private var setupRunning = false
 
     // Fired when Home is pressed while we're already in front: reset to the top of Apps, like tvOS.
     private val homePresses = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -27,7 +22,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repo = AppRepository(applicationContext)
-        homeSetup = HomeSetup(applicationContext)
         setContent {
             val apps by repo.apps.collectAsState()
             val settings by repo.settings.collectAsState()
@@ -41,9 +35,6 @@ class MainActivity : ComponentActivity() {
                     onLaunch = { start(repo.launchIntent(it), it.label) },
                     onAppInfo = { start(repo.appInfoIntent(it), it.label) },
                     onSetting = { start(it.intent, it.label) },
-                    setupStatus = setupStatus,
-                    onMakeHome = { runSetup(homeSetup::makeHome) },
-                    onRestoreHome = { runSetup(homeSetup::restoreStock) },
                 )
             }
         }
@@ -58,15 +49,6 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         homePresses.tryEmit(Unit)
-    }
-
-    private fun runSetup(action: suspend ((String) -> Unit) -> String) {
-        if (setupRunning) return
-        setupRunning = true
-        lifecycleScope.launch {
-            setupStatus = action { setupStatus = it }
-            setupRunning = false
-        }
     }
 
     private fun start(intent: Intent, label: String) {
