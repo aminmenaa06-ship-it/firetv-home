@@ -12,8 +12,8 @@ android {
         applicationId = "com.amin.tvhome"
         minSdk = 22 // Fire OS 5+
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "2.0"
     }
 
     buildTypes {
