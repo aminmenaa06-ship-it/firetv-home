@@ -1,0 +1,8 @@
+.gradle/
+build/
+local.properties
+*.apk
+.idea/
+run-logs/
+.kotlin/
+.DS_Store
