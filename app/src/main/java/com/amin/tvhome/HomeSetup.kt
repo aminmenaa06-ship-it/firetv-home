@@ -11,6 +11,8 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.math.BigInteger
 import java.net.ConnectException
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -70,28 +72,51 @@ class HomeSetup(private val context: Context) {
     private suspend fun withShell(status: (String) -> Unit, block: (Shell) -> String): String =
         withContext(Dispatchers.IO) {
             status("Connecting… if the TV asks \"Allow USB debugging?\", tick \"Always allow\" and choose Allow (or OK).")
-            try {
+            val key = loadOrCreateKey()
+            val failures = mutableListOf<String>()
+            // Some Fire OS builds drop adb connections that come from 127.0.0.1 mid-handshake, but
+            // accept the same device on its own Wi-Fi address, so try each in turn.
+            for (host in adbHosts()) {
                 // adbd sends nothing back when its prompt is declined or ignored, so bound every read.
-                Dadb.create("127.0.0.1", 5555, loadOrCreateKey(), connectTimeout = 3000, socketTimeout = 45_000).use { dadb ->
-                    val sh = Shell(dadb) // connects (and triggers the TV's approval prompt) here
+                val dadb = Dadb.create(host, 5555, key, connectTimeout = 3000, socketTimeout = 45_000)
+                val sh = try {
+                    Shell(dadb) // connects (and triggers the TV's approval prompt) here
+                } catch (e: Exception) {
+                    dadb.close()
+                    Log.e(TAG, "adb via $host failed", e)
+                    if ((e.cause ?: e) is SocketTimeoutException) {
+                        return@withContext "No answer to the TV's \"Allow USB debugging?\" prompt. Press the button again and choose Allow (or OK)."
+                    }
+                    if (e is AdbAuthException) {
+                        return@withContext "The TV declined the request. Press the button again and choose Allow (or OK)."
+                    }
+                    failures += "$host: ${describe(e)}"
+                    continue
+                }
+                return@withContext try {
                     status("Working…")
                     block(sh)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "home setup failed", e)
-                // dadb wraps socket errors in its own exception types; the cause says what happened.
-                val cause = e.cause ?: e
-                when {
-                    cause is SocketTimeoutException ->
-                        "No answer to the TV's \"Allow USB debugging?\" prompt. Press the button again and choose Allow (or OK)."
-                    cause is ConnectException ->
-                        "Couldn't reach ADB on this TV. Turn on Settings > My Fire TV > Developer Options > ADB Debugging, then try again."
-                    e is AdbAuthException ->
-                        "The TV declined the request. Press the button again and choose Allow (or OK)."
-                    else -> "Didn't work: ${e.message ?: e.javaClass.simpleName}"
+                } catch (e: Exception) {
+                    Log.e(TAG, "home setup failed via $host", e)
+                    "Didn't work: ${describe(e)}"
+                } finally {
+                    dadb.close()
                 }
             }
+            "Couldn't connect to ADB on this TV:\n${failures.joinToString("\n")}\n" +
+                "Check Settings > My Fire TV > Developer Options > ADB Debugging is on."
         }
+
+    private fun adbHosts(): List<String> {
+        val own = runCatching {
+            NetworkInterface.getNetworkInterfaces().toList()
+                .filter { it.isUp && !it.isLoopback }
+                .flatMap { it.inetAddresses.toList() }
+                .filterIsInstance<Inet4Address>()
+                .mapNotNull { it.hostAddress }
+        }.getOrDefault(emptyList())
+        return (listOf("127.0.0.1") + own).distinct()
+    }
 
     // dadb's own key helpers use java.util.Base64 (API 26+); Fire OS 6 is API 25, so build the
     // key pair with platform APIs and hand it over directly.
@@ -127,6 +152,13 @@ class HomeSetup(private val context: Context) {
         private const val TAG = "TvHomeSetup"
 
         private fun String.lastLine() = trim().lineSequence().lastOrNull().orEmpty()
+
+        // "Connection handshake failed (EOFException)" says far more than the wrapper message alone.
+        private fun describe(e: Throwable): String {
+            val cause = e.cause?.takeIf { it !== e }
+            val base = e.message ?: e.javaClass.simpleName
+            return if (cause == null) base else "$base (${cause.javaClass.simpleName}${cause.message?.let { ": $it" }.orEmpty()})"
+        }
 
         // adbd's RSAPublicKey struct (see adb's adb_auth_host.cpp): word count, n0inv, modulus and
         // R^2 as little-endian 32-bit words, then the exponent.
